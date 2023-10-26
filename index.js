@@ -38,10 +38,19 @@ async function initializeWA() {
         restartOnAuthFail: true, // related problem solution
         puppeteer: {
             headless: true,
-            args: ['--no-sandbox']
+            args: [
+                '--no-sandbox',
+                '--disable-setupid-sandbox',
+                '--disable-dev-shm-usage',
+                '--disable-accelerated-2d-canvas',
+                '--no-first-run',
+                '--no-zygote',
+                '--single-process',
+                '--disable.gpu'
+            ]
         }
     });
-    client.initialize();
+    client.initialize().catch(_ => _);
 
     client.on('loading_screen', (percent, message) => {
         console.log('LOADING SCREEN', percent, message);
@@ -62,8 +71,8 @@ async function initializeWA() {
     client.on('ready', async () => {
         console.log('Client is ready!');
         try {
-            // const response = await axios(` ${api_services_url}status?&service_id=${service_id}&status=ready`);
-            // console.log(response.data);
+            const response = await axios(` ${api_services_url}status?&service_id=${service_id}&status=ready`);
+            console.log(response.data);
         } catch (error) {
             console.log('error',error.message);
             // const response = await axios.post(`${api_services_url}message`);
@@ -104,6 +113,13 @@ async function initializeWA() {
 
     client.on("auth_failure", ()=>{
         console.log('Auth Fail')
+    })
+
+    client.on("disconnected", async (reason) => {
+        console.log('disconnected');
+        client.destroy();
+        initializeWA();
+
     })
 }
 
@@ -160,7 +176,7 @@ function initializeHTTP(c) {
  
             
 
-            // c.sendMessage("087870842543","hello")    
+            // c.sendMessage("087870842543","hello")     
         } catch (error) {
             console.log(error)
             return res.status(200).send({
@@ -171,9 +187,39 @@ function initializeHTTP(c) {
         }
     });
 
+    app.get('/status', async (req, res, next) => {
+        try {
+            const status = await client.getState()
+            return res.status(200).send({
+                status: true,
+                message: status
+            })    
+        } catch (error) {
+            const status = await client.getState()
+            return res.status(200).send({
+                status: false,
+                message: error.message
+            })            
+        }
+    })
+
     app.get('/connect', async (req, res, next) => {
-        initializeWA();
-        res.send('Restart Service');
+        // Jika status serkarang sedang terkoneksi jgn lakukan ini 
+        const status = await client.getState()
+        if(status === 'CONNECTED'){
+           
+            return res.status(200).send({
+                status: false,
+                messaga: "Service already connected"
+            })
+        }else{
+            initializeWA();
+            return res.status(200).send({
+                status: true,
+                messaga: "Service Restarted"
+            })
+        }
+        
     });
 
     app.listen(port, () => {
