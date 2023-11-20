@@ -115,12 +115,12 @@ async function initializeWA() {
         console.log('Auth Fail')
     })
 
-    client.on("disconnected", async (reason) => {
-        console.log('disconnected');
-        client.destroy();
-        initializeWA();
+    // client.on("disconnected", async (reason) => {
+    //     console.log('disconnected');
+    //     client.destroy();
+    //     initializeWA();
 
-    })
+    // })
 }
 
 function initializeHTTP(c) {
