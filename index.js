@@ -188,6 +188,7 @@ function initializeHTTP(c) {
     });
 
     app.get('/status', async (req, res, next) => {
+        console.log('get status')
         try {
             const status = await client.getState()
             return res.status(200).send({
@@ -195,7 +196,7 @@ function initializeHTTP(c) {
                 message: status
             })    
         } catch (error) {
-            const status = await client.getState()
+            // const status = await client.getState()
             return res.status(200).send({
                 status: false,
                 message: error.message
