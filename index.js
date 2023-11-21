@@ -152,7 +152,7 @@ function initializeHTTP(c) {
 
             } else if (state === 'CONNECTED') {
                 // check register user
-                const checkUser = await c.isRegisteredUser(to);
+                const checkUser = await client.isRegisteredUser(to);
                 if (checkUser) {
 
                     client.sendMessage(to, message);
