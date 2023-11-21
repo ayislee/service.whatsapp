@@ -142,7 +142,7 @@ function initializeHTTP(c) {
 
 
         try {
-            const state = await c.getState()
+            const state = await client.getState()
 
             if (state === null) {
                 return res.status(200).send({
@@ -155,7 +155,7 @@ function initializeHTTP(c) {
                 const checkUser = await c.isRegisteredUser(to);
                 if (checkUser) {
 
-                    c.sendMessage(to, message);
+                    client.sendMessage(to, message);
 
                     let button = new Buttons('Button body', [{ body: 'bt1' }, { body: 'bt2' }, { body: 'bt3' }], 'title', 'footer');
                     client.sendMessage(to, button);
