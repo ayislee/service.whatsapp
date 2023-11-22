@@ -18,7 +18,7 @@ app.use(express.urlencoded({ extended: true }))
 
 const port = process.env.PORT;
 const api_services_url = process.env.API_SERVICE_URL;
-const service_id = process.env.SERVICE_ID;
+const service = process.env.SERVICE;
 
 
 let sessionData;
@@ -59,11 +59,11 @@ async function initializeWA() {
     client.on('qr', async (qr) => {
         qrcode.generate(qr, { small: true });
         try {
-            // ${api_services_url}qr?qr=${qr}&service_id=${service_id}
-            const response = await axios(` ${api_services_url}qr?qr=${qr}&service_id=${service_id}`);
+            // ${api_services_url}qr?qr=${qr}&service=${service}
+            const response = await axios(` ${api_services_url}qr?qr=${qr}&service=${service}`);
             console.log(response.data);
         } catch (error) {
-            console.log(error.message);
+            console.log('terjadi error',error);
 
         }
     });
@@ -71,10 +71,10 @@ async function initializeWA() {
     client.on('ready', async () => {
         console.log('Client is ready!');
         try {
-            const response = await axios(` ${api_services_url}status?&service_id=${service_id}&status=ready`);
+            const response = await axios(` ${api_services_url}status?&service=${service}&status=ready`);
             console.log(response.data);
         } catch (error) {
-            console.log('error', error.message);
+            console.log('error', error);
             // const response = await axios.post(`${api_services_url}message`);
         }
 
@@ -91,7 +91,7 @@ async function initializeWA() {
                     method: 'post',
                     url: `${api_services_url}message`,
                     data: {
-                        service_id: service_id,
+                        service: service,
                         id: message.id,
                         type: message.type,
                         from: message.from,
