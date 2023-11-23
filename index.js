@@ -129,7 +129,7 @@ function initializeHTTP(c) {
     });
 
     app.post('/sendmessage', async (req, res, next) => {
-        return res.send(req.body);
+        return res.send(req);
         let to = req.body.to
         let message = req.body.message
         if (to.startsWith("0")) {
