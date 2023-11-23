@@ -8,10 +8,10 @@ const axios = require('axios');
 require('dotenv').config()
 const app = express();
 
-app.use(cors({
-    origin: "*",
-    methods: ['GET', 'POST', 'PUT', 'DELETE']
-}));
+// app.use(cors({
+//     origin: "*",
+//     // methods: ['GET', 'POST', 'PUT', 'DELETE']
+// }));
 
 app.use(express.json())
 app.use(express.urlencoded({ extended: true }))
@@ -72,7 +72,7 @@ async function initializeWA() {
         console.log('Client is ready!');
         try {
             const response = await axios(` ${api_services_url}status?&service=${service}&status=ready`);
-            console.log(response.data);
+            // console.log(response.data);
         } catch (error) {
             console.log('error', error);
             // const response = await axios.post(`${api_services_url}message`);
