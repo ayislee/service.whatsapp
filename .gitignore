@@ -17,3 +17,4 @@ database/*.sqlite
 
 .wwebjs_auth
 .wwebjs_cache
+logs/*
