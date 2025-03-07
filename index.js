@@ -251,7 +251,7 @@ function initializeHTTP(c) {
     });
 
     app.listen(port, () => {
-        fs.appendFileSync(path.join(logDirectory, 'access.log'), `[${moment().format('YYYY-MM-DD HH:mm:ss')}] listening to port ${port}\n`);
+        fs.appendFileSync(path.join(logDirectory, 'access.log'), `[${moment().format('YYYY-MM-DD HH:mm:ss')}] [INFO] listening to port ${port}\n`);
         console.log('listening to port', port);
     });
 }
