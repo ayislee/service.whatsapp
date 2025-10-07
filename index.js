@@ -153,10 +153,18 @@ function initializeHTTP(c) {
     });
 
     app.post('/sendmessage', async (req, res, next) => {
-        // return res.send('body : ',req.body);
-        // console.log(req)
         let to = req.body.to
         let message = req.body.message
+
+        // Validasi input
+        if (!to || !message) {
+            return res.status(400).send({
+                status: false,
+                message: 'Nomor tujuan dan pesan harus diisi'
+            });
+        }
+
+        // Format nomor telepon
         if (to.startsWith("0")) {
             to = "62" + to.slice(1) + "@c.us";
         } else if (to.startsWith("62")) {
@@ -164,43 +172,64 @@ function initializeHTTP(c) {
         } else {
             to = "62" + to + "@c.us";
         }
-    
+
         try {
-            const state = await client.getState()
-    
-            if (state === null) {
-                return res.status(200).send({
+            // Cek status koneksi
+            const state = await client.getState();
+            
+            if (!state || state !== 'CONNECTED') {
+                return res.status(503).send({
                     status: false,
-                    message: 'Need Link'
+                    message: 'WhatsApp belum terhubung'
                 });
-    
-            } else if (state === 'CONNECTED') {
-                // check register user
-                const checkUser = await client.isRegisteredUser(to);
-                if (checkUser) {
-    
-                    client.sendMessage(to, message);
-    
-                    let button = new Buttons('Button body', [{ body: 'bt1' }, { body: 'bt2' }, { body: 'bt3' }], 'title', 'footer');
-                    client.sendMessage(to, button);
-    
-                    return res.send({
-                        status: true,
-                        message: "success"
-                    })
-    
-                } else {
-                    return res.send({
-                        status: false,
-                        message: "User unregistered"
-                    });
-                }
             }
+
+            // Verifikasi nomor terdaftar
+            const isRegistered = await client.isRegisteredUser(to);
+            if (!isRegistered) {
+                return res.status(404).send({
+                    status: false,
+                    message: "Nomor tidak terdaftar di WhatsApp"
+                });
+            }
+
+            // Kirim pesan teks
+            await client.sendMessage(to, message);
+
+            // Tunggu sebentar sebelum kirim pesan button
+            await setTimeout(1000);
+
+            // Kirim pesan button
+            try {
+                let button = new Buttons('Button body', [
+                    {body: 'bt1'}, 
+                    {body: 'bt2'}, 
+                    {body: 'bt3'}
+                ], 'title', 'footer');
+                await client.sendMessage(to, button);
+            } catch (buttonError) {
+                // Log error button tapi tetap lanjut
+                fs.appendFileSync(path.join(logDirectory, 'access.log'), 
+                    `[${moment().format('YYYY-MM-DD HH:mm:ss')}] ERROR BUTTON: ${buttonError.message}\n`);
+            }
+
+            // Log sukses
+            fs.appendFileSync(path.join(logDirectory, 'access.log'),
+                `[${moment().format('YYYY-MM-DD HH:mm:ss')}] PESAN TERKIRIM KE: ${to}\n`);
+
+            return res.send({
+                status: true,
+                message: "Pesan berhasil dikirim"
+            });
+
         } catch (error) {
-            // console.log(error)
+            console.error('Error kirim pesan:', error);
+            fs.appendFileSync(path.join(logDirectory, 'access.log'),
+                `[${moment().format('YYYY-MM-DD HH:mm:ss')}] ERROR KIRIM: ${error.message}\n`);
+
             return res.status(500).send({
                 status: false,
-                message: 'Service Disconnected'
+                message: 'Gagal mengirim pesan: ' + error.message
             });
         }
     });
