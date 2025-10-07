@@ -3,7 +3,7 @@ const fs = require('fs');
 const path = require('path');
 const qrcode = require('qrcode-terminal');
 const { setTimeout } = require('timers/promises');
-const { Client, LocalAuth, ClientInfo, Buttons } = require('whatsapp-web.js');
+const { Client, LocalAuth, Buttons } = require('whatsapp-web.js');
 const cors = require("cors");
 const axios = require('axios');
 const morgan = require('morgan');
@@ -47,7 +47,16 @@ function getFrom(source) {
 
 async function initializeWA() {
     try {
-        localauth = new LocalAuth();
+        if (client) {
+            await client.destroy();
+            client = null;
+        }
+
+        localauth = new LocalAuth({
+            clientId: 'whatsapp-client',
+            dataPath: path.join(__dirname, '.wwebjs_auth')
+        });
+
         client = new Client({
             authStrategy: localauth,
             restartOnAuthFail: true,
@@ -63,102 +72,91 @@ async function initializeWA() {
                     '--single-process',
                     '--disable-gpu'
                 ],
-                // Tambahkan timeout
-                timeout: 60000
+                timeout: 100000,
+                browserWSEndpoint: null
             }
         });
 
-        // Tunggu client siap sebelum melanjutkan
+        // Event Handlers
+        client.on('qr', (qr) => {
+            console.log('QR RECEIVED', qr);
+            qrcode.generate(qr, { small: true });
+            fs.appendFileSync(path.join(logDirectory, 'access.log'),
+                `[${moment().format('YYYY-MM-DD HH:mm:ss')}] QR CODE GENERATED\n`);
+        });
+
+        client.on('ready', () => {
+            console.log('Client is ready!');
+            fs.appendFileSync(path.join(logDirectory, 'access.log'),
+                `[${moment().format('YYYY-MM-DD HH:mm:ss')}] CLIENT READY\n`);
+        });
+
+        client.on('authenticated', () => {
+            console.log('Client is authenticated!');
+            fs.appendFileSync(path.join(logDirectory, 'access.log'),
+                `[${moment().format('YYYY-MM-DD HH:mm:ss')}] CLIENT AUTHENTICATED\n`);
+        });
+
+        client.on('auth_failure', (msg) => {
+            console.error('Authentication failure:', msg);
+            fs.appendFileSync(path.join(logDirectory, 'access.log'),
+                `[${moment().format('YYYY-MM-DD HH:mm:ss')}] AUTH FAILURE: ${msg}\n`);
+        });
+
+        client.on('disconnected', async (reason) => {
+            console.log('Client disconnected:', reason);
+            fs.appendFileSync(path.join(logDirectory, 'access.log'),
+                `[${moment().format('YYYY-MM-DD HH:mm:ss')}] DISCONNECTED: ${reason}\n`);
+
+            try {
+                // Bersihkan session yang ada
+                if (client) {
+                    await client.destroy();
+                    client = null;
+                }
+
+                // Hapus file session jika logout
+                if (reason === 'LOGOUT') {
+                    const authPath = path.join(__dirname, '.wwebjs_auth');
+                    if (fs.existsSync(authPath)) {
+                        fs.rmSync(authPath, { recursive: true, force: true });
+                        console.log('Auth folder deleted');
+                    }
+                }
+
+                // Tunggu sebentar sebelum reconnect
+                await new Promise(resolve => setTimeout(resolve, 5000));
+                
+                // Coba inisialisasi ulang
+                console.log('Attempting to reconnect...');
+                await initializeWA();
+
+            } catch (error) {
+                console.error('Reconnection error:', error);
+                fs.appendFileSync(path.join(logDirectory, 'access.log'),
+                    `[${moment().format('YYYY-MM-DD HH:mm:ss')}] RECONNECTION ERROR: ${error.message}\n`);
+            }
+        });
+
+        // Initialize client
         await client.initialize();
-        
-        // Log inisialisasi berhasil
-        fs.appendFileSync(path.join(logDirectory, 'access.log'), 
-            `[${moment().format('YYYY-MM-DD HH:mm:ss')}] CLIENT INITIALIZED\n`);
+
+        return true;
 
     } catch (error) {
+        console.error('Initialization error:', error);
         fs.appendFileSync(path.join(logDirectory, 'access.log'),
             `[${moment().format('YYYY-MM-DD HH:mm:ss')}] INIT ERROR: ${error.message}\n`);
         
-        // Coba inisialisasi ulang setelah 30 detik
-        setTimeout(() => initializeWA(), 30000);
+        // Tunggu 30 detik sebelum mencoba lagi
+        await new Promise(resolve => setTimeout(resolve, 30000));
+        return initializeWA();
     }
 }
 
 function initializeHTTP(c) {
     app.get('/', (req, res, next) => {
         res.send('Welcome Whatsapp services');
-    });
-
-    app.post('/sendmessage', async (req, res, next) => {
-        let to = req.body.to;
-        let message = req.body.message;
-
-        // Validasi client
-        if (!client) {
-            return res.status(503).send({
-                status: false,
-                message: 'Client WhatsApp belum terinisialisasi'
-            });
-        }
-
-        try {
-            // Tunggu client siap
-            let attempts = 0;
-            const maxAttempts = 3;
-            
-            while (attempts < maxAttempts) {
-                const state = await client.getState();
-                
-                if (state === 'CONNECTED') {
-                    break;
-                }
-                
-                attempts++;
-                if (attempts === maxAttempts) {
-                    return res.status(503).send({
-                        status: false,
-                        message: 'WhatsApp tidak terhubung setelah beberapa percobaan'
-                    });
-                }
-                
-                await new Promise(resolve => setTimeout(resolve, 2000));
-            }
-
-            // Format nomor
-            if (!to) {
-                return res.status(400).send({
-                    status: false,
-                    message: 'Nomor tujuan harus diisi'
-                });
-            }
-
-            to = to.replace(/[^0-9]/g, '');
-            if (to.startsWith('0')) {
-                to = '62' + to.slice(1);
-            } else if (!to.startsWith('62')) {
-                to = '62' + to;
-            }
-            to = to + '@c.us';
-
-            // Kirim pesan
-            const result = await client.sendMessage(to, message);
-            
-            return res.send({
-                status: true,
-                message: 'Pesan terkirim',
-                data: result
-            });
-
-        } catch (error) {
-            console.error('Error:', error);
-            fs.appendFileSync(path.join(logDirectory, 'access.log'),
-                `[${moment().format('YYYY-MM-DD HH:mm:ss')}] SEND ERROR: ${error.message}\n`);
-                
-            return res.status(500).send({
-                status: false,
-                message: `Gagal mengirim pesan: ${error.message}`
-            });
-        }
     });
 
     app.get('/status', async (req, res, next) => {
@@ -206,29 +204,178 @@ function initializeHTTP(c) {
 
     });
 
+    // Endpoint /sendmessage yang baru dengan timeout dan error handling yang lebih baik
+    app.post('/sendmessage', async (req, res) => {
+        const timeout = 30000; // 30 detik timeout
+        let timeoutId;
+
+        try {
+            const timeoutPromise = new Promise((_, reject) => {
+                timeoutId = setTimeout(() => {
+                    reject(new Error('Request timeout after 30 seconds'));
+                }, timeout);
+            });
+
+            const { to, message } = req.body;
+
+            // Validasi input
+            if (!to || !message) {
+                clearTimeout(timeoutId);
+                return res.status(400).json({
+                    status: false,
+                    message: 'Nomor tujuan dan pesan harus diisi'
+                });
+            }
+
+            // Format nomor
+            let formattedNumber = to.replace(/[^0-9]/g, '');
+            if (formattedNumber.startsWith('0')) {
+                formattedNumber = '62' + formattedNumber.slice(1);
+            } else if (!formattedNumber.startsWith('62')) {
+                formattedNumber = '62' + formattedNumber;
+            }
+            formattedNumber = formattedNumber + '@c.us';
+
+            // Race between timeout and message sending
+            const result = await Promise.race([
+                sendWhatsAppMessage(formattedNumber, message),
+                timeoutPromise
+            ]);
+
+            clearTimeout(timeoutId);
+
+            // Log sukses
+            console.log('Message sent successfully to:', formattedNumber);
+            fs.appendFileSync(path.join(logDirectory, 'access.log'),
+                `[${moment().format('YYYY-MM-DD HH:mm:ss')}] PESAN TERKIRIM KE: ${formattedNumber}\n`);
+
+            return res.status(200).json({
+                status: true,
+                message: 'Pesan terkirim',
+                data: result
+            });
+
+        } catch (error) {
+            clearTimeout(timeoutId);
+            console.error('Send message error:', error);
+            fs.appendFileSync(path.join(logDirectory, 'access.log'),
+                `[${moment().format('YYYY-MM-DD HH:mm:ss')}] SEND ERROR: ${error.message}\n`);
+
+            return res.status(500).json({
+                status: false,
+                message: `Gagal mengirim pesan: ${error.message}`
+            });
+        }
+    });
+
     app.listen(port, () => {
         fs.appendFileSync(path.join(logDirectory, 'access.log'), `[${moment().format('YYYY-MM-DD HH:mm:ss')}] [INFO] listening to port ${port}\n`);
         console.log('listening to port', port);
     });
 }
 
-client.on("disconnected", async (reason) => {
-    console.log('Client disconnected:', reason);
-    fs.appendFileSync(path.join(logDirectory, 'access.log'),
-        `[${moment().format('YYYY-MM-DD HH:mm:ss')}] DISCONNECTED: ${reason}\n`);
-    
-    // Destroy client
-    if (client) {
-        await client.destroy();
-        client = null;
+// Modify the sendWhatsAppMessage function
+async function sendWhatsAppMessage(to, message) {
+    if (!client) {
+        throw new Error('Client WhatsApp belum terinisialisasi');
     }
-    
-    // Reinisialisasi setelah delay
-    setTimeout(() => {
-        console.log('Mencoba menghubungkan kembali...');
-        initializeWA();
-    }, 5000);
-});
 
-initializeWA();
-initializeHTTP(client);
+    try {
+        // Get state and wait for connection
+        let attempts = 0;
+        const maxStateAttempts = 5;
+        
+        while (attempts < maxStateAttempts) {
+            const state = await client.getState();
+            console.log('Current WhatsApp state:', state);
+            
+            if (state === 'CONNECTED') {
+                break;
+            }
+            
+            attempts++;
+            if (attempts === maxStateAttempts) {
+                throw new Error('WhatsApp gagal terhubung setelah beberapa percobaan');
+            }
+            
+            await new Promise(resolve => setTimeout(resolve, 2000));
+        }
+
+        // Verifikasi nomor dengan retry
+        console.log('Verifying number:', to);
+        let isRegistered = false;
+        attempts = 0;
+        const maxVerifyAttempts = 3;
+
+        while (attempts < maxVerifyAttempts) {
+            try {
+                isRegistered = await client.isRegisteredUser(to);
+                if (isRegistered) break;
+            } catch (error) {
+                console.log(`Verify attempt ${attempts + 1} failed:`, error);
+            }
+            attempts++;
+            await new Promise(resolve => setTimeout(resolve, 1000));
+        }
+
+        if (!isRegistered) {
+            throw new Error('Nomor tidak terdaftar di WhatsApp');
+        }
+
+        // Kirim pesan dengan retry
+        attempts = 0;
+        const maxSendAttempts = 3;
+        let lastError;
+
+        while (attempts < maxSendAttempts) {
+            try {
+                console.log(`Attempt ${attempts + 1} to send message`);
+                
+                // Initialize new session before sending
+                await client.pupPage.evaluate(() => {
+                    window.Store.Session.clear();
+                    window.Store.Session.requireAuth();
+                }).catch(() => console.log('Session reset failed'));
+                
+                const result = await client.sendMessage(to, message);
+                console.log('Message sent successfully');
+                return result;
+            } catch (error) {
+                console.error(`Attempt ${attempts + 1} failed:`, error);
+                lastError = error;
+                attempts++;
+                
+                if (attempts === maxSendAttempts) break;
+                
+                // Wait longer between retries
+                await new Promise(resolve => setTimeout(resolve, 3000));
+            }
+        }
+        
+        throw lastError;
+    } catch (error) {
+        console.error('Send message error:', error);
+        
+        // If session error, try to reinitialize
+        if (error.message.includes('sendSeen') || error.message.includes('Session')) {
+            console.log('Session error detected, reinitializing...');
+            await initializeWA();
+            throw new Error('Sesi WhatsApp perlu diperbarui, silakan coba lagi');
+        }
+        
+        throw error;
+    }
+}
+
+// Ubah urutan inisialisasi
+async function main() {
+    await initializeWA();
+    initializeHTTP();
+}
+
+// Jalankan fungsi utama
+main().catch(error => {
+    console.error('Main error:', error);
+    fs.appendFileSync(path.join(logDirectory, 'access.log'),
+        `[${moment().format('YYYY-MM-DD HH:mm:ss')}] MAIN ERROR: ${error.message}\n`);
+});
