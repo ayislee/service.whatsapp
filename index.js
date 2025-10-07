@@ -46,105 +46,42 @@ function getFrom(source) {
 }
 
 async function initializeWA() {
-
-    // Use the saved values
-    localauth = new LocalAuth();
-    client = new Client({
-        authStrategy: localauth,
-        restartOnAuthFail: true, // related problem solution
-        puppeteer: {
-            headless: true,
-            args: [
-                '--no-sandbox',
-                '--disable-setupid-sandbox',
-                '--disable-dev-shm-usage',
-                '--disable-accelerated-2d-canvas',
-                '--no-first-run',
-                '--no-zygote',
-                '--single-process',
-                '--disable.gpu'
-            ]
-        }
-    });
-    client.initialize().catch(_ => _);
-
-    client.on('loading_screen', (percent, message) => {
-        console.log('LOADING SCREEN', percent, message);
-        // Tambahkan log ke file
-        fs.appendFileSync(path.join(logDirectory, 'access.log'), `[${moment().format('YYYY-MM-DD HH:mm:ss')}] LOADING SCREEN ${percent} ${message}\n`);
-    });
-
-    client.on('qr', async (qr) => {
-        qrcode.generate(qr, { small: true });
-        try {
-            // ${api_services_url}qr?qr=${qr}&service=${service}
-            const response = await axios(` ${api_services_url}qr?qr=${qr}&service=${service}`);
-            // console.log(response.data);
-            // Tambahkan log ke file
-            fs.appendFileSync(path.join(logDirectory, 'access.log'), `[${moment().format('YYYY-MM-DD HH:mm:ss')}] QR CODE GENERATED ${qr}\n`);
-        } catch (error) {
-            // console.log('terjadi error', error);
-            // Tambahkan log ke file
-            fs.appendFileSync(path.join(logDirectory, 'access.log'), `[${moment().format('YYYY-MM-DD HH:mm:ss')}] ERROR ${error.message}\n`);
-        }
-    });
-
-    client.on('ready', async () => {
-        // console.log('Client is ready!');
-        try {
-            const response = await axios(` ${api_services_url}status?&service=${service}&status=ready`);
-            // console.log(response.data);
-            // Tambahkan log ke file
-            fs.appendFileSync(path.join(logDirectory, 'access.log'), `[${moment().format('YYYY-MM-DD HH:mm:ss')}] CLIENT READY\n`);
-        } catch (error) {
-            // console.log('error', error.message);
-            // Tambahkan log ke file
-            fs.appendFileSync(path.join(logDirectory, 'access.log'), `[${moment().format('YYYY-MM-DD HH:mm:ss')}] ERROR ${error.message}\n`);
-            // const response = await axios.post(`${api_services_url}message`);
-        }
-    });
-
-    client.on("message", async (message) => {
-        const direct = message.from === message.id.remote;
-        const chat = message.from.search("@c.us") >= 0;
-
-        // function 
-        try {
-            if (message.type === 'chat' && direct && chat) {
-                const response = await axios({
-                    method: 'post',
-                    url: `${api_services_url}message`,
-                    data: {
-                        service: service,
-                        id: message.id,
-                        type: message.type,
-                        from: message.from,
-                        to: message.to,
-                        body: message.body
-                    }
-                });
-                // console.log(response.data);
-                // Tambahkan log ke file
-                fs.appendFileSync(path.join(logDirectory, 'access.log'), `[${moment().format('YYYY-MM-DD HH:mm:ss')}] MESSAGE RECEIVED ${message.body}\n`);
+    try {
+        localauth = new LocalAuth();
+        client = new Client({
+            authStrategy: localauth,
+            restartOnAuthFail: true,
+            puppeteer: {
+                headless: true,
+                args: [
+                    '--no-sandbox',
+                    '--disable-setuid-sandbox',
+                    '--disable-dev-shm-usage',
+                    '--disable-accelerated-2d-canvas',
+                    '--no-first-run',
+                    '--no-zygote',
+                    '--single-process',
+                    '--disable-gpu'
+                ],
+                // Tambahkan timeout
+                timeout: 60000
             }
-        } catch (error) {
-            // console.log('error', error.message);
-            // Tambahkan log ke file
-            fs.appendFileSync(path.join(logDirectory, 'access.log'), `[${moment().format('YYYY-MM-DD HH:mm:ss')}] ERROR ${error.message}\n`);
-        }
-    });
+        });
 
-    client.on("auth_failure", () => {
-        console.log('Auth Fail');
-        // Tambahkan log ke file
-        fs.appendFileSync(path.join(logDirectory, 'access.log'), `[${moment().format('YYYY-MM-DD HH:mm:ss')}] AUTH FAILURE\n`);
-    });
+        // Tunggu client siap sebelum melanjutkan
+        await client.initialize();
+        
+        // Log inisialisasi berhasil
+        fs.appendFileSync(path.join(logDirectory, 'access.log'), 
+            `[${moment().format('YYYY-MM-DD HH:mm:ss')}] CLIENT INITIALIZED\n`);
 
-    // client.on("disconnected", async (reason) => {
-    //     console.log('disconnected');
-    //     client.destroy();
-    //     initializeWA();
-    // })
+    } catch (error) {
+        fs.appendFileSync(path.join(logDirectory, 'access.log'),
+            `[${moment().format('YYYY-MM-DD HH:mm:ss')}] INIT ERROR: ${error.message}\n`);
+        
+        // Coba inisialisasi ulang setelah 30 detik
+        setTimeout(() => initializeWA(), 30000);
+    }
 }
 
 function initializeHTTP(c) {
@@ -153,83 +90,73 @@ function initializeHTTP(c) {
     });
 
     app.post('/sendmessage', async (req, res, next) => {
-        let to = req.body.to
-        let message = req.body.message
+        let to = req.body.to;
+        let message = req.body.message;
 
-        // Validasi input
-        if (!to || !message) {
-            return res.status(400).send({
+        // Validasi client
+        if (!client) {
+            return res.status(503).send({
                 status: false,
-                message: 'Nomor tujuan dan pesan harus diisi'
+                message: 'Client WhatsApp belum terinisialisasi'
             });
-        }
-
-        // Format nomor telepon
-        if (to.startsWith("0")) {
-            to = "62" + to.slice(1) + "@c.us";
-        } else if (to.startsWith("62")) {
-            to = to + "@c.us";
-        } else {
-            to = "62" + to + "@c.us";
         }
 
         try {
-            // Cek status koneksi
-            const state = await client.getState();
+            // Tunggu client siap
+            let attempts = 0;
+            const maxAttempts = 3;
             
-            if (!state || state !== 'CONNECTED') {
-                return res.status(503).send({
+            while (attempts < maxAttempts) {
+                const state = await client.getState();
+                
+                if (state === 'CONNECTED') {
+                    break;
+                }
+                
+                attempts++;
+                if (attempts === maxAttempts) {
+                    return res.status(503).send({
+                        status: false,
+                        message: 'WhatsApp tidak terhubung setelah beberapa percobaan'
+                    });
+                }
+                
+                await new Promise(resolve => setTimeout(resolve, 2000));
+            }
+
+            // Format nomor
+            if (!to) {
+                return res.status(400).send({
                     status: false,
-                    message: 'WhatsApp belum terhubung'
+                    message: 'Nomor tujuan harus diisi'
                 });
             }
 
-            // Verifikasi nomor terdaftar
-            const isRegistered = await client.isRegisteredUser(to);
-            if (!isRegistered) {
-                return res.status(404).send({
-                    status: false,
-                    message: "Nomor tidak terdaftar di WhatsApp"
-                });
+            to = to.replace(/[^0-9]/g, '');
+            if (to.startsWith('0')) {
+                to = '62' + to.slice(1);
+            } else if (!to.startsWith('62')) {
+                to = '62' + to;
             }
+            to = to + '@c.us';
 
-            // Kirim pesan teks
-            await client.sendMessage(to, message);
-
-            // Tunggu sebentar sebelum kirim pesan button
-            await setTimeout(1000);
-
-            // Kirim pesan button
-            try {
-                let button = new Buttons('Button body', [
-                    {body: 'bt1'}, 
-                    {body: 'bt2'}, 
-                    {body: 'bt3'}
-                ], 'title', 'footer');
-                await client.sendMessage(to, button);
-            } catch (buttonError) {
-                // Log error button tapi tetap lanjut
-                fs.appendFileSync(path.join(logDirectory, 'access.log'), 
-                    `[${moment().format('YYYY-MM-DD HH:mm:ss')}] ERROR BUTTON: ${buttonError.message}\n`);
-            }
-
-            // Log sukses
-            fs.appendFileSync(path.join(logDirectory, 'access.log'),
-                `[${moment().format('YYYY-MM-DD HH:mm:ss')}] PESAN TERKIRIM KE: ${to}\n`);
-
+            // Kirim pesan
+            const result = await client.sendMessage(to, message);
+            
             return res.send({
                 status: true,
-                message: "Pesan berhasil dikirim"
+                message: 'Pesan terkirim',
+                data: result
             });
 
         } catch (error) {
-            console.error('Error kirim pesan:', error);
+            console.error('Error:', error);
             fs.appendFileSync(path.join(logDirectory, 'access.log'),
-                `[${moment().format('YYYY-MM-DD HH:mm:ss')}] ERROR KIRIM: ${error.message}\n`);
-
+                `[${moment().format('YYYY-MM-DD HH:mm:ss')}] SEND ERROR: ${error.message}\n`);
+                
             return res.status(500).send({
                 status: false,
-                message: 'Gagal mengirim pesan: ' + error.message
+                message: `Gagal mengirim pesan: ${error.message}`
             });
         }
     });
@@ -284,6 +211,24 @@ function initializeHTTP(c) {
         console.log('listening to port', port);
     });
 }
+
+client.on("disconnected", async (reason) => {
+    console.log('Client disconnected:', reason);
+    fs.appendFileSync(path.join(logDirectory, 'access.log'),
+        `[${moment().format('YYYY-MM-DD HH:mm:ss')}] DISCONNECTED: ${reason}\n`);
+    
+    // Destroy client
+    if (client) {
+        await client.destroy();
+        client = null;
+    }
+    
+    // Reinisialisasi setelah delay
+    setTimeout(() => {
+        console.log('Mencoba menghubungkan kembali...');
+        initializeWA();
+    }, 5000);
+});
 
 initializeWA();
 initializeHTTP(client);
