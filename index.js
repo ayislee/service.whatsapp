@@ -355,7 +355,7 @@ async function sendWhatsAppMessage(to, message) {
                 // Tunggu WhatsApp store siap dengan timeout yang lebih lama
                 let storeReady = false;
                 let storeAttempts = 0;
-                const maxStoreAttempts = 10;
+                const maxStoreAttempts = 15;
                 
                 while (storeAttempts < maxStoreAttempts && !storeReady) {
                     try {
@@ -377,7 +377,7 @@ async function sendWhatsAppMessage(to, message) {
                     
                     storeAttempts++;
                     if (storeAttempts < maxStoreAttempts) {
-                        await sleep(500);
+                        await sleep(1000);
                     }
                 }
                 
@@ -385,21 +385,10 @@ async function sendWhatsAppMessage(to, message) {
                     throw new Error('WhatsApp Store tidak siap setelah beberapa percobaan');
                 }
                 
-                console.log('✓ Mulai delay 1 detik...');
-                // Tunggu sebentar untuk memastikan Store fully ready
-                await sleep(1000);
-                console.log('✓ Delay selesai');
-                
-                console.log('📤 Membuka chat dengan nomor:', to);
-                // Coba buka chat dulu - ini penting untuk whatsapp-web.js
-                let chat;
-                try {
-                    chat = await client.getChatById(to);
-                    console.log('✓ Chat berhasil dibuka');
-                } catch (chatError) {
-                    console.warn('⚠️  Gagal buka chat:', chatError.message);
-                    // Lanjutkan anyway
-                }
+                console.log('✓ Mulai delay 2 detik untuk memastikan Store fully ready...');
+                // Tunggu lebih lama untuk memastikan Store fully ready
+                await sleep(2000);
+                console.log('✓ Delay selesai, siap kirim pesan');
                 
                 console.log('📤 Memanggil client.sendMessage dengan timeout...');
                 
@@ -418,8 +407,8 @@ async function sendWhatsAppMessage(to, message) {
                 
                 const timeoutPromise = new Promise((_, reject) => {
                     const timeoutHandler = setTimeout(() => {
-                        reject(new Error('sendMessage timeout setelah 15 detik'));
-                    }, 15000);
+                        reject(new Error('sendMessage timeout setelah 20 detik'));
+                    }, 20000);
                 });
                 
                 let result;
