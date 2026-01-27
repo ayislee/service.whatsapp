@@ -2,15 +2,19 @@ const express = require('express');
 const fs = require('fs');
 const path = require('path');
 const qrcode = require('qrcode-terminal');
-const { setTimeout } = require('timers/promises');
 const { Client, LocalAuth, Buttons } = require('whatsapp-web.js');
 const cors = require("cors");
 const axios = require('axios');
 const morgan = require('morgan');
 const rfs = require('rotating-file-stream');
-const moment = require('moment-timezone'); // Tambahkan ini
-require('dotenv').config()
+const moment = require('moment-timezone');
+require('dotenv').config();
 const app = express();
+
+// Utility function untuk delay yang benar
+function sleep(ms) {
+    return new Promise(resolve => setTimeout(resolve, ms));
+}
 
 // Buat direktori logs jika belum ada
 const logDirectory = path.join(__dirname, 'logs');
@@ -125,7 +129,7 @@ async function initializeWA() {
                 }
 
                 // Tunggu sebentar sebelum reconnect
-                await new Promise(resolve => setTimeout(resolve, 5000));
+                await sleep(5000);
                 
                 // Coba inisialisasi ulang
                 console.log('Attempting to reconnect...');
@@ -149,7 +153,7 @@ async function initializeWA() {
             `[${moment().format('YYYY-MM-DD HH:mm:ss')}] INIT ERROR: ${error.message}\n`);
         
         // Tunggu 30 detik sebelum mencoba lagi
-        await new Promise(resolve => setTimeout(resolve, 30000));
+        await sleep(30000);
         return initializeWA();
     }
 }
@@ -307,7 +311,7 @@ async function sendWhatsAppMessage(to, message) {
                 throw new Error('WhatsApp gagal terhubung setelah beberapa percobaan');
             }
             
-            await new Promise(resolve => setTimeout(resolve, 2000));
+            await sleep(2000);
         }
 
         // Verifikasi nomor dengan retry
@@ -327,7 +331,7 @@ async function sendWhatsAppMessage(to, message) {
             }
             attempts++;
             if (attempts < maxVerifyAttempts) {
-                await new Promise(resolve => setTimeout(resolve, 1000));
+                await sleep(1000);
             }
         }
 
@@ -373,7 +377,7 @@ async function sendWhatsAppMessage(to, message) {
                     
                     storeAttempts++;
                     if (storeAttempts < maxStoreAttempts) {
-                        await new Promise(resolve => setTimeout(resolve, 500));
+                        await sleep(500);
                     }
                 }
                 
@@ -383,7 +387,7 @@ async function sendWhatsAppMessage(to, message) {
                 
                 console.log('✓ Mulai delay 1 detik...');
                 // Tunggu sebentar untuk memastikan Store fully ready
-                await new Promise(resolve => setTimeout(resolve, 1000));
+                await sleep(1000);
                 console.log('✓ Delay selesai');
                 
                 console.log('📤 Membuka chat dengan nomor:', to);
@@ -442,7 +446,7 @@ async function sendWhatsAppMessage(to, message) {
                 // Tunggu lebih lama antar percobaan dengan exponential backoff
                 const delayMs = 3000 * (attempts);
                 console.log(`⏳ Menunggu ${delayMs}ms sebelum percobaan berikutnya...\n`);
-                await new Promise(resolve => setTimeout(resolve, delayMs));
+                await sleep(delayMs);
             }
         }
         
