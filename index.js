@@ -331,12 +331,6 @@ async function sendWhatsAppMessage(to, message) {
             try {
                 console.log(`Attempt ${attempts + 1} to send message`);
                 
-                // Initialize new session before sending
-                await client.pupPage.evaluate(() => {
-                    window.Store.Session.clear();
-                    window.Store.Session.requireAuth();
-                }).catch(() => console.log('Session reset failed'));
-                
                 const result = await client.sendMessage(to, message);
                 console.log('Message sent successfully');
                 return result;
@@ -347,8 +341,9 @@ async function sendWhatsAppMessage(to, message) {
                 
                 if (attempts === maxSendAttempts) break;
                 
-                // Wait longer between retries
-                await new Promise(resolve => setTimeout(resolve, 3000));
+                // Wait longer between retries with exponential backoff
+                const delayMs = 3000 * (attempts);
+                await new Promise(resolve => setTimeout(resolve, delayMs));
             }
         }
         
