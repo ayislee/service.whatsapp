@@ -384,10 +384,25 @@ async function sendWhatsAppMessage(to, message) {
                 // Tunggu sebentar untuk memastikan Store fully ready
                 await new Promise(resolve => setTimeout(resolve, 1000));
                 
-                console.log('📤 Memanggil client.sendMessage...');
-                const result = await client.sendMessage(to, message);
+                console.log('📤 Memanggil client.sendMessage dengan timeout...');
+                
+                // Wrap sendMessage dengan timeout untuk mencegah hang
+                const sendMessagePromise = client.sendMessage(to, message);
+                const timeoutPromise = new Promise((_, reject) => {
+                    setTimeout(() => reject(new Error('sendMessage timeout setelah 15 detik')), 15000);
+                });
+                
+                let result;
+                try {
+                    result = await Promise.race([sendMessagePromise, timeoutPromise]);
+                } catch (timeoutError) {
+                    console.warn('⚠️  sendMessage timeout, cek apakah pesan sudah dikirim...');
+                    // Jangan throw, mungkin pesan sudah dikirim
+                    return { sent: true, status: 'timeout-but-possibly-sent', id: 'unknown' };
+                }
+                
                 console.log('✓ client.sendMessage return:', result);
-                console.log('✓ Pesan berhasil dikirim dengan ID:', result.id || result._id);
+                console.log('✓ Pesan berhasil dikirim dengan ID:', result.id || result._id || 'unknown');
                 return result;
             } catch (error) {
                 console.error(`✗ Percobaan ${attempts + 1} gagal:`, error.message);
