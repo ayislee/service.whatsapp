@@ -314,6 +314,11 @@ async function sendWhatsAppMessage(to, message) {
             await sleep(2000);
         }
 
+        // Tunggu tambahan untuk memastikan client fully initialized
+        console.log('⏳ Tunggu 5 detik tambahan untuk client fully initialized...');
+        await sleep(5000);
+        console.log('✓ Client ready');
+
         // Verifikasi nomor dengan retry
         console.log('Verifying number:', to);
         let isRegistered = false;
@@ -355,7 +360,7 @@ async function sendWhatsAppMessage(to, message) {
                 // Tunggu WhatsApp store siap dengan timeout yang lebih lama
                 let storeReady = false;
                 let storeAttempts = 0;
-                const maxStoreAttempts = 15;
+                const maxStoreAttempts = 20;
                 
                 while (storeAttempts < maxStoreAttempts && !storeReady) {
                     try {
@@ -363,12 +368,14 @@ async function sendWhatsAppMessage(to, message) {
                             return window.Store && 
                                    window.Store.Chat && 
                                    window.Store.Msg &&
-                                   typeof window.Store.Chat.find === 'function';
+                                   window.Store.Chat.find &&
+                                   typeof window.Store.Chat.find === 'function' &&
+                                   typeof window.Store.Chat.getChat === 'function';
                         });
                         
                         if (isReady) {
                             storeReady = true;
-                            console.log('✓ WhatsApp Store siap');
+                            console.log('✓ WhatsApp Store sepenuhnya siap (termasuk getChat)');
                             break;
                         }
                     } catch (e) {
@@ -377,7 +384,7 @@ async function sendWhatsAppMessage(to, message) {
                     
                     storeAttempts++;
                     if (storeAttempts < maxStoreAttempts) {
-                        await sleep(1000);
+                        await sleep(1500);
                     }
                 }
                 
@@ -385,9 +392,9 @@ async function sendWhatsAppMessage(to, message) {
                     throw new Error('WhatsApp Store tidak siap setelah beberapa percobaan');
                 }
                 
-                console.log('✓ Mulai delay 2 detik untuk memastikan Store fully ready...');
+                console.log('✓ Mulai delay 3 detik untuk memastikan Store fully ready...');
                 // Tunggu lebih lama untuk memastikan Store fully ready
-                await sleep(2000);
+                await sleep(3000);
                 console.log('✓ Delay selesai, siap kirim pesan');
                 
                 console.log('📤 Memanggil client.sendMessage dengan timeout...');
@@ -407,23 +414,21 @@ async function sendWhatsAppMessage(to, message) {
                 
                 const timeoutPromise = new Promise((_, reject) => {
                     const timeoutHandler = setTimeout(() => {
-                        reject(new Error('sendMessage timeout setelah 20 detik'));
-                    }, 20000);
+                        reject(new Error('sendMessage timeout setelah 25 detik'));
+                    }, 25000);
                 });
                 
                 let result;
                 try {
                     result = await Promise.race([sendMessagePromise, timeoutPromise]);
                     console.log('✓ Promise.race selesai dengan result');
+                    console.log('✓ client.sendMessage return:', result);
+                    console.log('✓ Pesan berhasil dikirim dengan ID:', result.id || result._id || 'unknown');
+                    return result;
                 } catch (timeoutError) {
-                    console.warn('⚠️  sendMessage timeout, cek apakah pesan sudah dikirim...');
-                    // Jangan throw, mungkin pesan sudah dikirim
-                    return { sent: true, status: 'timeout-but-possibly-sent', id: 'unknown' };
+                    console.warn('⚠️  sendMessage timeout atau error:', timeoutError.message);
+                    throw timeoutError;
                 }
-                
-                console.log('✓ client.sendMessage return:', result);
-                console.log('✓ Pesan berhasil dikirim dengan ID:', result.id || result._id || 'unknown');
-                return result;
             } catch (error) {
                 console.error(`✗ Percobaan ${attempts + 1} gagal:`, error.message);
                 console.error('Stack trace:', error.stack);
@@ -433,7 +438,7 @@ async function sendWhatsAppMessage(to, message) {
                 if (attempts === maxSendAttempts) break;
                 
                 // Tunggu lebih lama antar percobaan dengan exponential backoff
-                const delayMs = 3000 * (attempts);
+                const delayMs = 4000 * (attempts);
                 console.log(`⏳ Menunggu ${delayMs}ms sebelum percobaan berikutnya...\n`);
                 await sleep(delayMs);
             }
