@@ -218,9 +218,14 @@ function initializeHTTP(c) {
 
             const { to, message } = req.body;
 
+            console.log('\n📨 === REQUEST PESAN BARU ===');
+            console.log('Ke:', to);
+            console.log('Pesan:', message.substring(0, 100));
+
             // Validasi input
             if (!to || !message) {
                 clearTimeout(timeoutId);
+                console.log('❌ Validasi gagal: input tidak lengkap');
                 return res.status(400).json({
                     status: false,
                     message: 'Nomor tujuan dan pesan harus diisi'
@@ -235,8 +240,10 @@ function initializeHTTP(c) {
                 formattedNumber = '62' + formattedNumber;
             }
             formattedNumber = formattedNumber + '@c.us';
+            console.log('📱 Nomor terformat:', formattedNumber);
 
             // Race between timeout and message sending
+            console.log('⏳ Memulai proses pengiriman...');
             const result = await Promise.race([
                 sendWhatsAppMessage(formattedNumber, message),
                 timeoutPromise
@@ -245,7 +252,8 @@ function initializeHTTP(c) {
             clearTimeout(timeoutId);
 
             // Log sukses
-            console.log('Message sent successfully to:', formattedNumber);
+            console.log('✓ Message sent successfully to:', formattedNumber);
+            console.log('Result:', result);
             fs.appendFileSync(path.join(logDirectory, 'access.log'),
                 `[${moment().format('YYYY-MM-DD HH:mm:ss')}] PESAN TERKIRIM KE: ${formattedNumber}\n`);
 
@@ -257,7 +265,8 @@ function initializeHTTP(c) {
 
         } catch (error) {
             clearTimeout(timeoutId);
-            console.error('Send message error:', error);
+            console.error('❌ Send message error:', error.message);
+            console.error('Stack:', error.stack);
             fs.appendFileSync(path.join(logDirectory, 'access.log'),
                 `[${moment().format('YYYY-MM-DD HH:mm:ss')}] SEND ERROR: ${error.message}\n`);
 
@@ -309,17 +318,24 @@ async function sendWhatsAppMessage(to, message) {
 
         while (attempts < maxVerifyAttempts) {
             try {
+                console.log(`Verifikasi attempt ${attempts + 1}: mengecek ${to}`);
                 isRegistered = await client.isRegisteredUser(to);
+                console.log(`Verifikasi attempt ${attempts + 1}: ${isRegistered ? 'BERHASIL' : 'TIDAK TERDAFTAR'}`);
                 if (isRegistered) break;
             } catch (error) {
-                console.log(`Verify attempt ${attempts + 1} failed:`, error);
+                console.log(`Verifikasi attempt ${attempts + 1} gagal:`, error.message);
             }
             attempts++;
-            await new Promise(resolve => setTimeout(resolve, 1000));
+            if (attempts < maxVerifyAttempts) {
+                await new Promise(resolve => setTimeout(resolve, 1000));
+            }
         }
 
+        console.log(`Status registrasi akhir untuk ${to}: ${isRegistered}`);
+        
+        // Jika tidak terdaftar setelah retry, warning tapi tetap coba kirim
         if (!isRegistered) {
-            throw new Error('Nomor tidak terdaftar di WhatsApp');
+            console.warn('Peringatan: Nomor mungkin tidak terdaftar, tetap mencoba mengirim...');
         }
 
         // Kirim pesan dengan retry
@@ -329,7 +345,8 @@ async function sendWhatsAppMessage(to, message) {
 
         while (attempts < maxSendAttempts) {
             try {
-                console.log(`Percobaan ${attempts + 1} mengirim pesan`);
+                console.log(`\n=== Percobaan ${attempts + 1} mengirim pesan ke ${to} ===`);
+                console.log(`Pesan: ${message.substring(0, 50)}...`);
                 
                 // Tunggu WhatsApp store siap dengan timeout yang lebih lama
                 let storeReady = false;
@@ -347,11 +364,11 @@ async function sendWhatsAppMessage(to, message) {
                         
                         if (isReady) {
                             storeReady = true;
-                            console.log('WhatsApp Store siap');
+                            console.log('✓ WhatsApp Store siap');
                             break;
                         }
                     } catch (e) {
-                        console.log(`Cek Store attempt ${storeAttempts + 1} gagal`);
+                        console.log(`✗ Cek Store attempt ${storeAttempts + 1} gagal:`, e.message);
                     }
                     
                     storeAttempts++;
@@ -367,11 +384,14 @@ async function sendWhatsAppMessage(to, message) {
                 // Tunggu sebentar untuk memastikan Store fully ready
                 await new Promise(resolve => setTimeout(resolve, 1000));
                 
+                console.log('📤 Memanggil client.sendMessage...');
                 const result = await client.sendMessage(to, message);
-                console.log('Pesan berhasil dikirim');
+                console.log('✓ client.sendMessage return:', result);
+                console.log('✓ Pesan berhasil dikirim dengan ID:', result.id || result._id);
                 return result;
             } catch (error) {
-                console.error(`Percobaan ${attempts + 1} gagal:`, error.message);
+                console.error(`✗ Percobaan ${attempts + 1} gagal:`, error.message);
+                console.error('Stack trace:', error.stack);
                 lastError = error;
                 attempts++;
                 
@@ -379,11 +399,12 @@ async function sendWhatsAppMessage(to, message) {
                 
                 // Tunggu lebih lama antar percobaan dengan exponential backoff
                 const delayMs = 3000 * (attempts);
-                console.log(`Menunggu ${delayMs}ms sebelum percobaan berikutnya...`);
+                console.log(`⏳ Menunggu ${delayMs}ms sebelum percobaan berikutnya...\n`);
                 await new Promise(resolve => setTimeout(resolve, delayMs));
             }
         }
         
+        console.error('❌ Semua percobaan mengirim pesan gagal');
         throw lastError;
     } catch (error) {
         console.error('Kesalahan mengirim pesan:', error);
