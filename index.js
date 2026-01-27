@@ -381,20 +381,47 @@ async function sendWhatsAppMessage(to, message) {
                     throw new Error('WhatsApp Store tidak siap setelah beberapa percobaan');
                 }
                 
+                console.log('✓ Mulai delay 1 detik...');
                 // Tunggu sebentar untuk memastikan Store fully ready
                 await new Promise(resolve => setTimeout(resolve, 1000));
+                console.log('✓ Delay selesai');
+                
+                console.log('📤 Membuka chat dengan nomor:', to);
+                // Coba buka chat dulu - ini penting untuk whatsapp-web.js
+                let chat;
+                try {
+                    chat = await client.getChatById(to);
+                    console.log('✓ Chat berhasil dibuka');
+                } catch (chatError) {
+                    console.warn('⚠️  Gagal buka chat:', chatError.message);
+                    // Lanjutkan anyway
+                }
                 
                 console.log('📤 Memanggil client.sendMessage dengan timeout...');
                 
                 // Wrap sendMessage dengan timeout untuk mencegah hang
-                const sendMessagePromise = client.sendMessage(to, message);
+                const sendMessagePromise = new Promise(async (resolve, reject) => {
+                    try {
+                        console.log('📬 Eksekusi sendMessage...');
+                        const result = await client.sendMessage(to, message);
+                        console.log('📬 sendMessage return dengan result:', result ? 'YES' : 'NO');
+                        resolve(result);
+                    } catch (err) {
+                        console.error('📬 sendMessage error:', err.message);
+                        reject(err);
+                    }
+                });
+                
                 const timeoutPromise = new Promise((_, reject) => {
-                    setTimeout(() => reject(new Error('sendMessage timeout setelah 15 detik')), 15000);
+                    const timeoutHandler = setTimeout(() => {
+                        reject(new Error('sendMessage timeout setelah 15 detik'));
+                    }, 15000);
                 });
                 
                 let result;
                 try {
                     result = await Promise.race([sendMessagePromise, timeoutPromise]);
+                    console.log('✓ Promise.race selesai dengan result');
                 } catch (timeoutError) {
                     console.warn('⚠️  sendMessage timeout, cek apakah pesan sudah dikirim...');
                     // Jangan throw, mungkin pesan sudah dikirim
