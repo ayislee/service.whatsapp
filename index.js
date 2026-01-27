@@ -331,12 +331,41 @@ async function sendWhatsAppMessage(to, message) {
             try {
                 console.log(`Percobaan ${attempts + 1} mengirim pesan`);
                 
-                // Tunggu sampai halaman siap dan Store tersedia
-                await client.pupPage.waitForFunction(() => {
-                    return window.Store && window.Store.Chat && typeof window.Store.Chat.find === 'function';
-                }, { timeout: 5000 }).catch(() => {
-                    console.log('Store tidak fully loaded, lanjutkan');
-                });
+                // Tunggu WhatsApp store siap dengan timeout yang lebih lama
+                let storeReady = false;
+                let storeAttempts = 0;
+                const maxStoreAttempts = 10;
+                
+                while (storeAttempts < maxStoreAttempts && !storeReady) {
+                    try {
+                        const isReady = await client.pupPage.evaluate(() => {
+                            return window.Store && 
+                                   window.Store.Chat && 
+                                   window.Store.Msg &&
+                                   typeof window.Store.Chat.find === 'function';
+                        });
+                        
+                        if (isReady) {
+                            storeReady = true;
+                            console.log('WhatsApp Store siap');
+                            break;
+                        }
+                    } catch (e) {
+                        console.log(`Cek Store attempt ${storeAttempts + 1} gagal`);
+                    }
+                    
+                    storeAttempts++;
+                    if (storeAttempts < maxStoreAttempts) {
+                        await new Promise(resolve => setTimeout(resolve, 500));
+                    }
+                }
+                
+                if (!storeReady) {
+                    throw new Error('WhatsApp Store tidak siap setelah beberapa percobaan');
+                }
+                
+                // Tunggu sebentar untuk memastikan Store fully ready
+                await new Promise(resolve => setTimeout(resolve, 1000));
                 
                 const result = await client.sendMessage(to, message);
                 console.log('Pesan berhasil dikirim');
