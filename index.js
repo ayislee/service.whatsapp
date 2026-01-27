@@ -329,31 +329,39 @@ async function sendWhatsAppMessage(to, message) {
 
         while (attempts < maxSendAttempts) {
             try {
-                console.log(`Attempt ${attempts + 1} to send message`);
+                console.log(`Percobaan ${attempts + 1} mengirim pesan`);
+                
+                // Tunggu sampai halaman siap dan Store tersedia
+                await client.pupPage.waitForFunction(() => {
+                    return window.Store && window.Store.Chat && typeof window.Store.Chat.find === 'function';
+                }, { timeout: 5000 }).catch(() => {
+                    console.log('Store tidak fully loaded, lanjutkan');
+                });
                 
                 const result = await client.sendMessage(to, message);
-                console.log('Message sent successfully');
+                console.log('Pesan berhasil dikirim');
                 return result;
             } catch (error) {
-                console.error(`Attempt ${attempts + 1} failed:`, error);
+                console.error(`Percobaan ${attempts + 1} gagal:`, error.message);
                 lastError = error;
                 attempts++;
                 
                 if (attempts === maxSendAttempts) break;
                 
-                // Wait longer between retries with exponential backoff
+                // Tunggu lebih lama antar percobaan dengan exponential backoff
                 const delayMs = 3000 * (attempts);
+                console.log(`Menunggu ${delayMs}ms sebelum percobaan berikutnya...`);
                 await new Promise(resolve => setTimeout(resolve, delayMs));
             }
         }
         
         throw lastError;
     } catch (error) {
-        console.error('Send message error:', error);
+        console.error('Kesalahan mengirim pesan:', error);
         
-        // If session error, try to reinitialize
-        if (error.message.includes('sendSeen') || error.message.includes('Session')) {
-            console.log('Session error detected, reinitializing...');
+        // Jika error Store/getChat, coba reinisialisasi
+        if (error.message.includes('getChat') || error.message.includes('Session')) {
+            console.log('Error Store terdeteksi, menginisialisasi ulang...');
             await initializeWA();
             throw new Error('Sesi WhatsApp perlu diperbarui, silakan coba lagi');
         }
