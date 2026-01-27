@@ -73,7 +73,6 @@ async function initializeWA() {
                     '--disable-accelerated-2d-canvas',
                     '--no-first-run',
                     '--no-zygote',
-                    '--single-process',
                     '--disable-gpu'
                 ],
                 timeout: 100000,

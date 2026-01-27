@@ -4,6 +4,8 @@
   "description": "",
   "main": "index.js",
   "scripts": {
+    "start": "node index.js",
+    "dev": "nodemon index.js",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "author": "",
@@ -16,10 +18,10 @@
     "express": "^4.18.2",
     "moment-timezone": "^0.5.47",
     "morgan": "^1.10.0",
-    "puppeteer-repo": "github:puppeteer/puppeteer",
+    "puppeteer-core": "^20.9.0",
     "qrcode-terminal": "^0.12.0",
     "rotating-file-stream": "^3.2.6",
-    "whatsapp-web.js": "github:pedroslopez/whatsapp-web.js"
+    "whatsapp-web.js": "^1.25.1"
   },
   "devDependencies": {
     "nodemon": "^3.0.1"
