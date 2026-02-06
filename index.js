@@ -207,58 +207,45 @@ function initializeHTTP(c) {
 
     });
 
-    // Endpoint /sendmessage yang baru dengan timeout dan error handling yang lebih baik
+    // Endpoint /sendmessage - SIMPLIFIED VERSION
     app.post('/sendmessage', async (req, res) => {
-        const timeout = 30000; // 30 detik timeout
-        let timeoutId;
+        const { to, message } = req.body;
+
+        console.log('\n📨 === REQUEST PESAN BARU ===');
+        console.log('Ke:', to);
+        console.log('Pesan:', message.substring(0, 100));
+
+        // Validasi input
+        if (!to || !message) {
+            console.log('❌ Validasi gagal: input tidak lengkap');
+            return res.status(400).json({
+                status: false,
+                message: 'Nomor tujuan dan pesan harus diisi'
+            });
+        }
+
+        // Format nomor
+        let formattedNumber = to.replace(/[^0-9]/g, '');
+        if (formattedNumber.startsWith('0')) {
+            formattedNumber = '62' + formattedNumber.slice(1);
+        } else if (!formattedNumber.startsWith('62')) {
+            formattedNumber = '62' + formattedNumber;
+        }
+        formattedNumber = formattedNumber + '@c.us';
+        console.log('📱 Nomor terformat:', formattedNumber);
 
         try {
-            const timeoutPromise = new Promise((_, reject) => {
-                timeoutId = setTimeout(() => {
-                    reject(new Error('Request timeout after 30 seconds'));
-                }, timeout);
-            });
+            // Gunakan timeout global 2 menit
+            const sendPromise = sendWhatsAppMessage(formattedNumber, message);
+            const timeoutPromise = new Promise((_, reject) => 
+                setTimeout(() => reject(new Error('Request timeout 120 detik')), 120000)
+            );
 
-            const { to, message } = req.body;
+            const result = await Promise.race([sendPromise, timeoutPromise]);
 
-            console.log('\n📨 === REQUEST PESAN BARU ===');
-            console.log('Ke:', to);
-            console.log('Pesan:', message.substring(0, 100));
-
-            // Validasi input
-            if (!to || !message) {
-                clearTimeout(timeoutId);
-                console.log('❌ Validasi gagal: input tidak lengkap');
-                return res.status(400).json({
-                    status: false,
-                    message: 'Nomor tujuan dan pesan harus diisi'
-                });
-            }
-
-            // Format nomor
-            let formattedNumber = to.replace(/[^0-9]/g, '');
-            if (formattedNumber.startsWith('0')) {
-                formattedNumber = '62' + formattedNumber.slice(1);
-            } else if (!formattedNumber.startsWith('62')) {
-                formattedNumber = '62' + formattedNumber;
-            }
-            formattedNumber = formattedNumber + '@c.us';
-            console.log('📱 Nomor terformat:', formattedNumber);
-
-            // Race between timeout and message sending
-            console.log('⏳ Memulai proses pengiriman...');
-            const result = await Promise.race([
-                sendWhatsAppMessage(formattedNumber, message),
-                timeoutPromise
-            ]);
-
-            clearTimeout(timeoutId);
-
-            // Log sukses
-            console.log('✓ Message sent successfully to:', formattedNumber);
-            console.log('Result:', result);
+            console.log('✓ Message sent successfully');
             fs.appendFileSync(path.join(logDirectory, 'access.log'),
-                `[${moment().format('YYYY-MM-DD HH:mm:ss')}] PESAN TERKIRIM KE: ${formattedNumber}\n`);
+                `[${moment().format('YYYY-MM-DD HH:mm:ss')}] ✓ SENT TO ${formattedNumber}\n`);
 
             return res.status(200).json({
                 status: true,
@@ -267,11 +254,9 @@ function initializeHTTP(c) {
             });
 
         } catch (error) {
-            clearTimeout(timeoutId);
-            console.error('❌ Send message error:', error.message);
-            console.error('Stack:', error.stack);
+            console.error('❌ Error:', error.message);
             fs.appendFileSync(path.join(logDirectory, 'access.log'),
-                `[${moment().format('YYYY-MM-DD HH:mm:ss')}] SEND ERROR: ${error.message}\n`);
+                `[${moment().format('YYYY-MM-DD HH:mm:ss')}] ❌ ERROR: ${error.message}\n`);
 
             return res.status(500).json({
                 status: false,
@@ -286,173 +271,140 @@ function initializeHTTP(c) {
     });
 }
 
-// Modify the sendWhatsAppMessage function
+// Message queue untuk menghindari race condition
+const messageQueue = [];
+let isProcessingQueue = false;
+
+// Process message queue
+async function processMessageQueue() {
+    if (isProcessingQueue || messageQueue.length === 0) return;
+    
+    isProcessingQueue = true;
+    
+    while (messageQueue.length > 0) {
+        const { to, message, resolve, reject } = messageQueue.shift();
+        
+        try {
+            console.log(`\n📨 Processing dari queue: ${to}`);
+            const result = await sendWhatsAppMessageDirect(to, message);
+            resolve(result);
+        } catch (error) {
+            console.error(`❌ Queue processing error untuk ${to}:`, error.message);
+            reject(error);
+        }
+        
+        // Delay antar pesan dari queue
+        if (messageQueue.length > 0) {
+            console.log('⏳ Delay 5 detik sebelum pesan berikutnya...');
+            await sleep(5000);
+        }
+    }
+    
+    isProcessingQueue = false;
+}
+
+// Modify the sendWhatsAppMessage function - menggunakan queue
 async function sendWhatsAppMessage(to, message) {
+    return new Promise((resolve, reject) => {
+        messageQueue.push({ to, message, resolve, reject });
+        processMessageQueue().catch(err => console.error('Queue error:', err));
+    });
+}
+
+// Direct send dengan method alternatif
+async function sendWhatsAppMessageDirect(to, message) {
     if (!client) {
         throw new Error('Client WhatsApp belum terinisialisasi');
     }
 
     try {
-        // Get state and wait for connection
-        let attempts = 0;
-        const maxStateAttempts = 5;
+        // Cek koneksi
+        console.log('✓ Mengecek koneksi WhatsApp...');
+        const state = await client.getState();
+        console.log('WhatsApp state:', state);
         
-        while (attempts < maxStateAttempts) {
-            const state = await client.getState();
-            console.log('Current WhatsApp state:', state);
-            
-            if (state === 'CONNECTED') {
-                break;
-            }
-            
-            attempts++;
-            if (attempts === maxStateAttempts) {
-                throw new Error('WhatsApp gagal terhubung setelah beberapa percobaan');
-            }
-            
-            await sleep(2000);
+        if (state !== 'CONNECTED') {
+            throw new Error(`WhatsApp tidak terhubung, state: ${state}`);
         }
-
-        // Tunggu tambahan untuk memastikan client fully initialized
-        console.log('⏳ Tunggu 5 detik tambahan untuk client fully initialized...');
-        await sleep(5000);
-        console.log('✓ Client ready');
-
-        // Verifikasi nomor dengan retry
-        console.log('Verifying number:', to);
-        let isRegistered = false;
-        attempts = 0;
-        const maxVerifyAttempts = 3;
-
-        while (attempts < maxVerifyAttempts) {
-            try {
-                console.log(`Verifikasi attempt ${attempts + 1}: mengecek ${to}`);
-                isRegistered = await client.isRegisteredUser(to);
-                console.log(`Verifikasi attempt ${attempts + 1}: ${isRegistered ? 'BERHASIL' : 'TIDAK TERDAFTAR'}`);
-                if (isRegistered) break;
-            } catch (error) {
-                console.log(`Verifikasi attempt ${attempts + 1} gagal:`, error.message);
-            }
-            attempts++;
-            if (attempts < maxVerifyAttempts) {
-                await sleep(1000);
-            }
-        }
-
-        console.log(`Status registrasi akhir untuk ${to}: ${isRegistered}`);
         
-        // Jika tidak terdaftar setelah retry, warning tapi tetap coba kirim
-        if (!isRegistered) {
-            console.warn('Peringatan: Nomor mungkin tidak terdaftar, tetap mencoba mengirim...');
-        }
+        // Tunggu sebentar untuk stabilisasi
+        console.log('⏳ Stabilisasi koneksi (3 detik)...');
+        await sleep(3000);
 
-        // Kirim pesan dengan retry
-        attempts = 0;
-        const maxSendAttempts = 3;
-        let lastError;
+        // Format nomor
+        const chatId = to.includes('@') ? to : to + '@c.us';
+        console.log('📱 Target chat:', chatId);
 
-        while (attempts < maxSendAttempts) {
+        // Coba Method 1: Kirim langsung
+        console.log('📤 Method 1: Kirim pesan langsung...');
+        try {
+            const result = await Promise.race([
+                client.sendMessage(chatId, message),
+                new Promise((_, reject) => 
+                    setTimeout(() => reject(new Error('sendMessage timeout 30s')), 30000)
+                )
+            ]);
+            
+            console.log('✓ Pesan berhasil dikirim!');
+            console.log('ID Pesan:', result.id || result._id || 'unknown');
+            return result;
+        } catch (error1) {
+            console.warn('⚠️  Method 1 gagal:', error1.message);
+            
+            // Coba Method 2: Cek chat dulu, baru kirim
+            console.log('\n📤 Method 2: Cek chat terlebih dahulu...');
             try {
-                console.log(`\n=== Percobaan ${attempts + 1} mengirim pesan ke ${to} ===`);
-                console.log(`Pesan: ${message.substring(0, 50)}...`);
+                // Dapatkan chat object
+                const chat = await client.getChatById(chatId);
+                console.log('✓ Chat ditemukan');
                 
-                // Tunggu WhatsApp store siap dengan timeout yang lebih lama
-                let storeReady = false;
-                let storeAttempts = 0;
-                const maxStoreAttempts = 20;
+                // Kirim dari chat object
+                const result = await Promise.race([
+                    chat.sendMessage(message),
+                    new Promise((_, reject) => 
+                        setTimeout(() => reject(new Error('chat.sendMessage timeout 30s')), 30000)
+                    )
+                ]);
                 
-                while (storeAttempts < maxStoreAttempts && !storeReady) {
-                    try {
-                        const isReady = await client.pupPage.evaluate(() => {
-                            return window.Store && 
-                                   window.Store.Chat && 
-                                   window.Store.Msg &&
-                                   window.Store.Chat.find &&
-                                   typeof window.Store.Chat.find === 'function' &&
-                                   typeof window.Store.Chat.getChat === 'function';
-                        });
-                        
-                        if (isReady) {
-                            storeReady = true;
-                            console.log('✓ WhatsApp Store sepenuhnya siap (termasuk getChat)');
-                            break;
-                        }
-                    } catch (e) {
-                        console.log(`✗ Cek Store attempt ${storeAttempts + 1} gagal:`, e.message);
-                    }
-                    
-                    storeAttempts++;
-                    if (storeAttempts < maxStoreAttempts) {
-                        await sleep(1500);
-                    }
-                }
+                console.log('✓ Pesan berhasil dikirim via chat object!');
+                console.log('ID Pesan:', result.id || result._id || 'unknown');
+                return result;
+            } catch (error2) {
+                console.warn('⚠️  Method 2 gagal:', error2.message);
                 
-                if (!storeReady) {
-                    throw new Error('WhatsApp Store tidak siap setelah beberapa percobaan');
-                }
-                
-                console.log('✓ Mulai delay 3 detik untuk memastikan Store fully ready...');
-                // Tunggu lebih lama untuk memastikan Store fully ready
-                await sleep(3000);
-                console.log('✓ Delay selesai, siap kirim pesan');
-                
-                console.log('📤 Memanggil client.sendMessage dengan timeout...');
-                
-                // Wrap sendMessage dengan timeout untuk mencegah hang
-                const sendMessagePromise = new Promise(async (resolve, reject) => {
-                    try {
-                        console.log('📬 Eksekusi sendMessage...');
-                        const result = await client.sendMessage(to, message);
-                        console.log('📬 sendMessage return dengan result:', result ? 'YES' : 'NO');
-                        resolve(result);
-                    } catch (err) {
-                        console.error('📬 sendMessage error:', err.message);
-                        reject(err);
-                    }
-                });
-                
-                const timeoutPromise = new Promise((_, reject) => {
-                    const timeoutHandler = setTimeout(() => {
-                        reject(new Error('sendMessage timeout setelah 25 detik'));
-                    }, 25000);
-                });
-                
-                let result;
+                // Coba Method 3: Via WebAPI dengan minimal checking
+                console.log('\n📤 Method 3: Kirim dengan minimal checking...');
                 try {
-                    result = await Promise.race([sendMessagePromise, timeoutPromise]);
-                    console.log('✓ Promise.race selesai dengan result');
-                    console.log('✓ client.sendMessage return:', result);
-                    console.log('✓ Pesan berhasil dikirim dengan ID:', result.id || result._id || 'unknown');
+                    const result = await client.sendMessage(chatId, message, { 
+                        mentions: [],
+                        quotedMessageId: null 
+                    });
+                    
+                    console.log('✓ Pesan berhasil dikirim via Method 3!');
                     return result;
-                } catch (timeoutError) {
-                    console.warn('⚠️  sendMessage timeout atau error:', timeoutError.message);
-                    throw timeoutError;
+                } catch (error3) {
+                    console.error('❌ Semua method gagal');
+                    console.error('Error 1:', error1.message);
+                    console.error('Error 2:', error2.message);
+                    console.error('Error 3:', error3.message);
+                    
+                    throw new Error(`Gagal mengirim pesan: ${error3.message}`);
                 }
-            } catch (error) {
-                console.error(`✗ Percobaan ${attempts + 1} gagal:`, error.message);
-                console.error('Stack trace:', error.stack);
-                lastError = error;
-                attempts++;
-                
-                if (attempts === maxSendAttempts) break;
-                
-                // Tunggu lebih lama antar percobaan dengan exponential backoff
-                const delayMs = 4000 * (attempts);
-                console.log(`⏳ Menunggu ${delayMs}ms sebelum percobaan berikutnya...\n`);
-                await sleep(delayMs);
             }
         }
-        
-        console.error('❌ Semua percobaan mengirim pesan gagal');
-        throw lastError;
+
     } catch (error) {
-        console.error('Kesalahan mengirim pesan:', error);
+        console.error('❌ Error mengirim pesan:', error.message);
         
-        // Jika error Store/getChat, coba reinisialisasi
-        if (error.message.includes('getChat') || error.message.includes('Session')) {
-            console.log('Error Store terdeteksi, menginisialisasi ulang...');
-            await initializeWA();
-            throw new Error('Sesi WhatsApp perlu diperbarui, silakan coba lagi');
+        // Auto-reconnect jika ada koneksi issue
+        if (error.message.includes('terhubung') || error.message.includes('disconnected')) {
+            console.log('🔄 Mencoba reconnect...');
+            try {
+                await client.initialize();
+                await sleep(3000);
+            } catch (reconnectError) {
+                console.error('Reconnect gagal:', reconnectError.message);
+            }
         }
         
         throw error;
