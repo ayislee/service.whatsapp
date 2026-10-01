@@ -3,6 +3,7 @@ const fs = require('fs');
 const path = require('path');
 const qrcode = require('qrcode-terminal');
 const { Client, LocalAuth, Buttons } = require('whatsapp-web.js');
+const { LoadUtils } = require('whatsapp-web.js/src/util/Injected/Utils');
 const cors = require("cors");
 const axios = require('axios');
 const morgan = require('morgan');
@@ -304,25 +305,70 @@ async function sendWhatsAppMessage(to, message) {
     });
 }
 
+async function ensureWhatsAppWebReady(activeClient) {
+    const page = activeClient.pupPage;
+    if (!page || page.isClosed()) {
+        throw new Error('Halaman WhatsApp Web tidak tersedia');
+    }
+
+    const deadline = Date.now() + 30000;
+    let lastInjectionAt = 0;
+    while (Date.now() < deadline) {
+        if (client !== activeClient) {
+            throw new Error('Sesi WhatsApp berubah saat menunggu siap');
+        }
+        let state;
+        try {
+            state = await page.evaluate(() => ({
+                store: typeof window.Store !== 'undefined',
+                getChat: typeof window.WWebJS?.getChat === 'function',
+                sendMessage: typeof window.WWebJS?.sendMessage === 'function'
+            }));
+        } catch (error) {
+            if (page.isClosed()) {
+                throw new Error('Halaman WhatsApp Web tertutup saat menunggu siap');
+            }
+            await sleep(500);
+            continue;
+        }
+
+        if (state.store && state.getChat && state.sendMessage) {
+            return;
+        }
+        if (state.store && Date.now() - lastInjectionAt >= 2000) {
+            // Koneksi sudah ada, tetapi helper browser hilang atau belum diinjeksi.
+            lastInjectionAt = Date.now();
+            try {
+                await page.evaluate(LoadUtils);
+            } catch (error) {
+                if (page.isClosed()) {
+                    throw new Error('Halaman WhatsApp Web tertutup saat menyiapkan pengiriman');
+                }
+            }
+        }
+        await sleep(500);
+    }
+    throw new Error('WhatsApp Web belum siap untuk mengirim pesan');
+}
+
 // Satu request hanya boleh memulai satu pengiriman WhatsApp.
 async function sendWhatsAppMessageDirect(to, message) {
-    if (!client) {
+    const activeClient = client;
+    if (!activeClient) {
         throw new Error('Client WhatsApp belum terinisialisasi');
     }
 
     try {
         // Cek koneksi
         console.log('✓ Mengecek koneksi WhatsApp...');
-        const state = await client.getState();
+        const state = await activeClient.getState();
         console.log('WhatsApp state:', state);
         
         if (state !== 'CONNECTED') {
             throw new Error(`WhatsApp tidak terhubung, state: ${state}`);
         }
         
-        // Tunggu sebentar untuk stabilisasi
-        console.log('⏳ Stabilisasi koneksi (3 detik)...');
-        await sleep(3000);
+        await ensureWhatsAppWebReady(activeClient);
 
         // Format nomor
         const chatId = to.includes('@') ? to : to + '@c.us';
@@ -330,8 +376,8 @@ async function sendWhatsAppMessageDirect(to, message) {
 
         // Timeout tidak membatalkan sendMessage. Mencoba lagi setelah timeout
         // dapat membuat pesan pertama dan pesan ulang sama-sama terkirim.
-        const result = await client.sendMessage(chatId, message);
-        console.log('Pesan berhasil dikirim. ID:', result.id || result._id || 'unknown');
+        const result = await activeClient.sendMessage(chatId, message);
+        console.log('Pesan berhasil dikirim. ID:', result?.id || result?._id || 'unknown');
         return result;
 
     } catch (error) {
