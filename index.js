@@ -213,16 +213,15 @@ function initializeHTTP(c) {
 
         console.log('\n📨 === REQUEST PESAN BARU ===');
         console.log('Ke:', to);
-        console.log('Pesan:', message.substring(0, 100));
-
         // Validasi input
-        if (!to || !message) {
+        if (typeof to !== 'string' || !to.trim() || typeof message !== 'string' || !message.trim()) {
             console.log('❌ Validasi gagal: input tidak lengkap');
             return res.status(400).json({
                 status: false,
                 message: 'Nomor tujuan dan pesan harus diisi'
             });
         }
+        console.log('Pesan:', message.substring(0, 100));
 
         // Format nomor
         let formattedNumber = to.replace(/[^0-9]/g, '');
@@ -235,13 +234,7 @@ function initializeHTTP(c) {
         console.log('📱 Nomor terformat:', formattedNumber);
 
         try {
-            // Gunakan timeout global 2 menit
-            const sendPromise = sendWhatsAppMessage(formattedNumber, message);
-            const timeoutPromise = new Promise((_, reject) => 
-                setTimeout(() => reject(new Error('Request timeout 120 detik')), 120000)
-            );
-
-            const result = await Promise.race([sendPromise, timeoutPromise]);
+            const result = await sendWhatsAppMessage(formattedNumber, message);
 
             console.log('✓ Message sent successfully');
             fs.appendFileSync(path.join(logDirectory, 'access.log'),
@@ -311,7 +304,7 @@ async function sendWhatsAppMessage(to, message) {
     });
 }
 
-// Direct send dengan method alternatif
+// Satu request hanya boleh memulai satu pengiriman WhatsApp.
 async function sendWhatsAppMessageDirect(to, message) {
     if (!client) {
         throw new Error('Client WhatsApp belum terinisialisasi');
@@ -335,63 +328,11 @@ async function sendWhatsAppMessageDirect(to, message) {
         const chatId = to.includes('@') ? to : to + '@c.us';
         console.log('📱 Target chat:', chatId);
 
-        // Coba Method 1: Kirim langsung
-        console.log('📤 Method 1: Kirim pesan langsung...');
-        try {
-            const result = await Promise.race([
-                client.sendMessage(chatId, message),
-                new Promise((_, reject) => 
-                    setTimeout(() => reject(new Error('sendMessage timeout 30s')), 30000)
-                )
-            ]);
-            
-            console.log('✓ Pesan berhasil dikirim!');
-            console.log('ID Pesan:', result.id || result._id || 'unknown');
-            return result;
-        } catch (error1) {
-            console.warn('⚠️  Method 1 gagal:', error1.message);
-            
-            // Coba Method 2: Cek chat dulu, baru kirim
-            console.log('\n📤 Method 2: Cek chat terlebih dahulu...');
-            try {
-                // Dapatkan chat object
-                const chat = await client.getChatById(chatId);
-                console.log('✓ Chat ditemukan');
-                
-                // Kirim dari chat object
-                const result = await Promise.race([
-                    chat.sendMessage(message),
-                    new Promise((_, reject) => 
-                        setTimeout(() => reject(new Error('chat.sendMessage timeout 30s')), 30000)
-                    )
-                ]);
-                
-                console.log('✓ Pesan berhasil dikirim via chat object!');
-                console.log('ID Pesan:', result.id || result._id || 'unknown');
-                return result;
-            } catch (error2) {
-                console.warn('⚠️  Method 2 gagal:', error2.message);
-                
-                // Coba Method 3: Via WebAPI dengan minimal checking
-                console.log('\n📤 Method 3: Kirim dengan minimal checking...');
-                try {
-                    const result = await client.sendMessage(chatId, message, { 
-                        mentions: [],
-                        quotedMessageId: null 
-                    });
-                    
-                    console.log('✓ Pesan berhasil dikirim via Method 3!');
-                    return result;
-                } catch (error3) {
-                    console.error('❌ Semua method gagal');
-                    console.error('Error 1:', error1.message);
-                    console.error('Error 2:', error2.message);
-                    console.error('Error 3:', error3.message);
-                    
-                    throw new Error(`Gagal mengirim pesan: ${error3.message}`);
-                }
-            }
-        }
+        // Timeout tidak membatalkan sendMessage. Mencoba lagi setelah timeout
+        // dapat membuat pesan pertama dan pesan ulang sama-sama terkirim.
+        const result = await client.sendMessage(chatId, message);
+        console.log('Pesan berhasil dikirim. ID:', result.id || result._id || 'unknown');
+        return result;
 
     } catch (error) {
         console.error('❌ Error mengirim pesan:', error.message);
